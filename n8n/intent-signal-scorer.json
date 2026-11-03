@@ -1,0 +1,274 @@
+{
+  "name": "Intent signal scorer (Evaboot)",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 8 * * 1"
+            }
+          ]
+        }
+      },
+      "id": "506e93d1-8b6a-4bad-aeee-8982450cfd22",
+      "name": "Every Monday at 8",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "17d83b1f-2b24-4209-8ced-7c54f08be1fc",
+              "name": "accounts_extraction_id",
+              "type": "string",
+              "value": "PASTE_THE_EXTRACTION_ID_OF_YOUR_ACCOUNT_EXPORT"
+            },
+            {
+              "id": "56c36f4b-59bb-44c4-95a8-91e4e1a92188",
+              "name": "search_has_hiring_filter",
+              "type": "string",
+              "value": "yes"
+            },
+            {
+              "id": "c8dd4842-8ff2-4dc6-b483-c5de8d46af16",
+              "name": "intent_csv_url",
+              "type": "string",
+              "value": "PASTE_THE_CSV_LINK_OF_YOUR_INTENT_EXPORT"
+            },
+            {
+              "id": "db1c6f3a-d1ac-4cc6-b1ae-6fcf8e9e510b",
+              "name": "topics",
+              "type": "string",
+              "value": "Sales Intelligence, Lead Generation, Sales Prospecting"
+            },
+            {
+              "id": "3703ff3f-be91-4892-80da-1f2323d4b59f",
+              "name": "accounts_tab_url",
+              "type": "string",
+              "value": "PASTE_THE_ACCOUNTS_TAB_URL_WITH_GID"
+            },
+            {
+              "id": "d6572cc8-22cd-4c3f-9186-f5c50fb4dfc2",
+              "name": "points",
+              "type": "string",
+              "value": "{\"intent_surge\": 10, \"intent_extra_topic\": 3, \"fast_growth\": 6, \"fit\": 5, \"recent_growth\": 4, \"hiring\": 3}"
+            },
+            {
+              "id": "28b4790a-fc25-44e4-bed3-45a4d827bb7e",
+              "name": "settings",
+              "type": "string",
+              "value": "{\"surge_threshold\": 60, \"max_extra_topics\": 2, \"fast_growth_pct\": 30, \"recent_growth_pct\": 15, \"tier_now\": 20, \"tier_next\": 10}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "c25d60f9-28be-4f7b-ab47-89f9f595e0c5",
+      "name": "Your settings",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        220,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "endpointUrl": "https://mcp.evaboot.com/mcp",
+        "authentication": "bearerAuth",
+        "tool": {
+          "__rl": true,
+          "mode": "list",
+          "value": "get_export",
+          "cachedResultName": "get_export"
+        },
+        "inputMode": "json",
+        "jsonInput": "={{ JSON.stringify({ extraction_id: $('Your settings').first().json.accounts_extraction_id }) }}",
+        "options": {
+          "timeout": 120000
+        }
+      },
+      "id": "e7fd83a2-31a4-4ca7-844a-3083293a867c",
+      "name": "Get the accounts",
+      "type": "@n8n/n8n-nodes-langchain.mcpClient",
+      "typeVersion": 1.1,
+      "position": [
+        440,
+        0
+      ],
+      "credentials": {
+        "httpBearerAuth": {
+          "id": "",
+          "name": "Evaboot MCP (Bearer)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "={{ $('Your settings').first().json.intent_csv_url }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "file"
+            }
+          }
+        }
+      },
+      "id": "27afd566-57e3-4cc7-b302-4ba4a469ca74",
+      "name": "Intent export",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        660,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "csv",
+        "options": {}
+      },
+      "id": "75d9ec02-964f-4c13-9a86-21df14c0c709",
+      "name": "Read the CSV",
+      "type": "n8n-nodes-base.extractFromFile",
+      "typeVersion": 1,
+      "position": [
+        880,
+        0
+      ],
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "jsCode": "\n// Same as score.py: match the intent rows and the Sales Navigator accounts by domain, score, tier.\nconst s = $('Your settings').first().json;\nconst P = JSON.parse(s.points), S = JSON.parse(s.settings);\nconst topicsWanted = String(s.topics || '').split(',').map(t => t.trim().toLowerCase()).filter(Boolean);\nconst num = v => { const n = parseFloat(String(v ?? '').replace(/[,%]/g, '')); return isNaN(n) ? null : n; };\nconst NOT_A_DOMAIN = new Set(['linktr.ee', 'linkedin.com', 'bit.ly', 'facebook.com', 'google.com']);\nconst domainOf = v => {\n  let x = String(v || '').trim().toLowerCase();\n  if (!x) return '';\n  x = x.replace(/^[a-z]+:\\/\\//, '').split(/[/?#:]/)[0].replace(/^(www\\d?|get|go|app)\\./, '');\n  return NOT_A_DOMAIN.has(x) ? '' : x;\n};\nconst pick = (row, names) => { const k = Object.keys(row).find(h => names.includes(h.toLowerCase().trim())); return k ? row[k] : ''; };\n\n// Intent rows -> {domain: {company, topics}}\nconst intent = {};\nfor (const { json: r } of $('Read the CSV').all()) {\n  const d = domainOf(pick(r, ['domain', 'company domain', 'website', 'company website', 'company_domain']));\n  const score = num(pick(r, ['score', 'composite score', 'intent score', 'surge score', 'intent strength', 'signal score']));\n  const topic = String(pick(r, ['topic', 'topic name', 'intent topic', 'keyword', 'category']) || 'intent').trim();\n  if (!d || score === null || (topicsWanted.length && !topicsWanted.includes(topic.toLowerCase()))) continue;\n  const a = intent[d] ??= { company: String(pick(r, ['company', 'company name', 'account', 'account name', 'company_name']) || ''), topics: {} };\n  a.topics[topic] = Math.max(score, a.topics[topic] || 0);\n}\n\n// Sales Navigator accounts from the Evaboot export\nconst accounts = {};\nfor (const a of $('Get the accounts').first().json.structuredContent?.result?.prospects || []) {\n  if (String(a['Matches Filters'] || 'match').toLowerCase() === 'no_match') continue;\n  const d = domainOf(a['Company Domain']) || domainOf(a['Company Website URL']);\n  accounts[d || 'name:' + String(a['Company Name']).toLowerCase()] ??= { raw: a, domain: d };\n}\n\nconst TIERS = [[S.tier_now, 'now', 'export the buyers and reach out this week'],\n               [S.tier_next, 'next', \"add to next week's list\"], [-Infinity, 'watch', 'wait for a stronger signal']];\nconst today = new Date().toISOString().slice(0, 10);\nconst keys = [...Object.keys(accounts), ...Object.keys(intent).filter(d => !accounts[d])];\nreturn keys.map(key => {\n  const acc = accounts[key], raw = acc ? acc.raw : {}, domain = acc ? acc.domain : key;\n  const signals = []; let total = 0;\n  const surging = Object.entries(intent[domain]?.topics || {}).filter(([, v]) => v >= S.surge_threshold).sort((a, b) => b[1] - a[1]);\n  if (surging.length) {\n    total += P.intent_surge + Math.min(surging.length - 1, S.max_extra_topics) * P.intent_extra_topic;\n    signals.push(`intent surge on ${surging.length} topic${surging.length > 1 ? 's' : ''}`);\n  }\n  if (acc) {\n    total += P.fit; signals.push('fits your account search');\n    if (s.search_has_hiring_filter === 'yes') { total += P.hiring; signals.push('hiring on LinkedIn'); }\n  }\n  const g1 = num(raw['Company Employee Growth 1 Year (%)']), g6 = num(raw['Company Employee Growth 6 Months (%)']);\n  if (g1 !== null && g1 >= S.fast_growth_pct) { total += P.fast_growth; signals.push(`headcount +${Math.round(g1)}% in a year`); }\n  if (g6 !== null && g6 >= S.recent_growth_pct) { total += P.recent_growth; signals.push(`headcount +${Math.round(g6)}% in 6 months`); }\n  let [, tier, action] = TIERS.find(t => total >= t[0]);\n  if (!acc) { action = 'intent only: check the account fits'; signals.push('not in your account search: check fit'); }\n  return { json: {\n    'Date': today, 'Tier': tier, 'Score': total,\n    'Company': raw['Company Name'] || intent[domain]?.company || domain, 'Domain': domain,\n    'Signals': signals.join(', ') || 'none', 'Intent topics': surging.map(([t, v]) => `${t} ${v}`).join('; '),\n    'Growth 1y %': g1 ?? '', 'Growth 6m %': g6 ?? '', 'Employees': raw['Company Employee Exact Count'] || '',\n    'LinkedIn': raw['Company Linkedin URL Unique ID'] || '', 'Action': action,\n  } };\n}).sort((a, b) => b.json.Score - a.json.Score || String(a.json.Company).localeCompare(String(b.json.Company)));\n"
+      },
+      "id": "a69d3e5f-22d4-4387-bce5-b253eb001cb9",
+      "name": "Score and tier",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1100,
+        0
+      ],
+      "executeOnce": true
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "mode": "url",
+          "value": "={{ $('Your settings').first().json.accounts_tab_url }}"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "url",
+          "value": "={{ $('Your settings').first().json.accounts_tab_url }}"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": {},
+          "matchingColumns": [],
+          "schema": []
+        },
+        "options": {
+          "useAppend": true
+        }
+      },
+      "id": "05cbbee3-9d7d-474d-abe4-b95f3db5da19",
+      "name": "Add to Accounts",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        1320,
+        0
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "",
+          "name": "Google Sheets account"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Every Monday at 8": {
+      "main": [
+        [
+          {
+            "node": "Your settings",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Your settings": {
+      "main": [
+        [
+          {
+            "node": "Get the accounts",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get the accounts": {
+      "main": [
+        [
+          {
+            "node": "Intent export",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Intent export": {
+      "main": [
+        [
+          {
+            "node": "Read the CSV",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read the CSV": {
+      "main": [
+        [
+          {
+            "node": "Score and tier",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Score and tier": {
+      "main": [
+        [
+          {
+            "node": "Add to Accounts",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "pinData": {}
+}

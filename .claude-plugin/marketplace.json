@@ -1,0 +1,14 @@
+{
+  "name": "evaboot-labs-intent-signal-scorer",
+  "owner": { "name": "Evaboot", "url": "https://evaboot.com" },
+  "metadata": {
+    "description": "Evaboot Labs: rank accounts by third-party intent data plus Sales Navigator signals."
+  },
+  "plugins": [
+    {
+      "name": "intent-signal-scorer",
+      "source": "./",
+      "description": "Merge an intent data provider's export (Bombora, 6sense, ZoomInfo, G2...) with Sales Navigator account signals exported by Evaboot, score every account and get the buyers at the accounts to work now."
+    }
+  ]
+}

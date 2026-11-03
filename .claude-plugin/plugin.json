@@ -1,0 +1,13 @@
+{
+  "name": "intent-signal-scorer",
+  "version": "1.0.0",
+  "description": "Merge an intent data provider's export (Bombora, 6sense, ZoomInfo, G2...) with Sales Navigator account signals exported by Evaboot, score every account and get the buyers at the accounts to work now.",
+  "author": { "name": "Evaboot", "url": "https://evaboot.com" },
+  "homepage": "https://evaboot.com/blog/intent-data-providers",
+  "repository": "https://github.com/evaboot-labs/intent-signal-scorer",
+  "license": "MIT",
+  "privacyPolicyUrl": "https://evaboot.com/privacy-policy",
+  "keywords": ["intent-data", "account-scoring", "sales-navigator", "abm", "evaboot", "mcp"],
+  "skills": "./skills/",
+  "mcpServers": "./.mcp.json"
+}
